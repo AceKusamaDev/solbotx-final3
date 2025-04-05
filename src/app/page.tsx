@@ -27,41 +27,99 @@ export default function Home() {
 
   // Check if wallet is connected
   useEffect(() => {
-    const checkWalletConnection = async () => {
-      if (typeof window !== 'undefined' && window.phantom?.solana) {
-        try {
-          // Check if already connected
-          const isPhantomConnected = window.phantom.solana.isConnected;
-          setConnected(isPhantomConnected);
-        } catch (error) {
-          console.error('Error checking wallet connection:', error);
-          setConnected(false);
+    // Try to restore connection state from localStorage
+    const savedConnectionState = localStorage.getItem('walletConnected');
+    if (savedConnectionState === 'true') {
+      setConnected(true);
+    }
+
+    const checkWalletConnection = () => {
+      if (typeof window !== 'undefined') {
+        // Check for Phantom
+        if (window.phantom?.solana) {
+          try {
+            const isPhantomConnected = window.phantom.solana.isConnected;
+            console.log("Phantom connection status:", isPhantomConnected);
+            setConnected(isPhantomConnected);
+            
+            // Save connection state to localStorage
+            localStorage.setItem('walletConnected', isPhantomConnected.toString());
+          } catch (error) {
+            console.error('Error checking Phantom connection:', error);
+          }
+        }
+        
+        // Check for Solana object directly (for other wallets)
+        else if (window.solana?.isConnected) {
+          console.log("Solana connection detected");
+          setConnected(true);
+          localStorage.setItem('walletConnected', 'true');
         }
       }
     };
     
+    // Check immediately
     checkWalletConnection();
     
-    // Set up event listener for wallet connection changes
+    // Set up event listeners for wallet connection changes
     const handleWalletConnectionChange = () => {
-      if (window.phantom?.solana) {
-        setConnected(window.phantom.solana.isConnected);
-      }
+      console.log("Wallet connection changed");
+      checkWalletConnection();
     };
     
     if (typeof window !== 'undefined') {
-      window.addEventListener('phantomConnectionChanged', handleWalletConnectionChange);
+      // Listen for Phantom's specific events
+      window.addEventListener('phxAccountChanged', handleWalletConnectionChange);
+      window.addEventListener('phxDisconnected', () => {
+        setConnected(false);
+        localStorage.setItem('walletConnected', 'false');
+      });
+      window.addEventListener('phxConnected', () => {
+        console.log("Phantom connected event");
+        setConnected(true);
+        localStorage.setItem('walletConnected', 'true');
+      });
+      
+      // Check connection status every 2 seconds as a fallback
+      const intervalId = setInterval(checkWalletConnection, 2000);
       
       return () => {
-        window.removeEventListener('phantomConnectionChanged', handleWalletConnectionChange);
+        window.removeEventListener('phxAccountChanged', handleWalletConnectionChange);
+        window.removeEventListener('phxDisconnected', () => setConnected(false));
+        window.removeEventListener('phxConnected', () => setConnected(true));
+        clearInterval(intervalId);
       };
     }
   }, []);
+
+  // Manual connect function as a fallback
+  const manualConnect = async () => {
+    if (typeof window !== 'undefined') {
+      try {
+        if (window.phantom?.solana) {
+          await window.phantom.solana.connect();
+          setConnected(true);
+          localStorage.setItem('walletConnected', 'true');
+        } else if (window.solana) {
+          await window.solana.connect();
+          setConnected(true);
+          localStorage.setItem('walletConnected', 'true');
+        } else {
+          alert("No Solana wallet found. Please install Phantom wallet.");
+        }
+      } catch (error) {
+        console.error("Error connecting to wallet:", error);
+        alert("Failed to connect to wallet. Please try again.");
+      }
+    }
+  };
 
   // Update strategy params when config changes
   const handleStrategyUpdate = (newParams: any) => {
     setStrategyParams(newParams);
   };
+
+  console.log("Current connected state:", connected);
 
   return (
     <div className="flex flex-col space-y-8">
@@ -78,7 +136,7 @@ export default function Home() {
             </div>
           </div>
         </div>
-      )}
+      ) }
       
       <div className="pt-16">
         <h1 className="text-3xl font-bold">SolBotX AI Trading Bot</h1>
@@ -89,9 +147,15 @@ export default function Home() {
             <p className="text-gray-400 mb-6">
               Please connect your Phantom wallet to start using the SolBotX trading bot.
             </p>
-            <p className="text-gray-400">
+            <p className="text-gray-400 mb-6">
               Click the Connect Wallet button in the top right corner.
             </p>
+            <button 
+              onClick={manualConnect}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+            >
+              Connect Wallet Manually
+            </button>
           </div>
         ) : (
           <>
@@ -132,6 +196,11 @@ declare global {
         connect: () => Promise<{ publicKey: { toString: () => string } }>;
         disconnect: () => Promise<void>;
       };
+    };
+    solana?: {
+      isConnected?: boolean;
+      connect: () => Promise<any>;
+      disconnect: () => Promise<void>;
     };
   }
 }
